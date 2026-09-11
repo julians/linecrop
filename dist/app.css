@@ -73,7 +73,7 @@ code { padding: 0.08em 0.35em; border: 1px solid #cbd1cb; border-radius: 4px; ba
 .drop-title { font-size: 1.16rem; font-weight: 720; }
 .drop-help { margin-top: 6px; color: var(--muted); font-size: 0.9rem; }
 
-.result-row { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 20px; align-items: center; padding: 0 18px 18px; }
+.result-row { padding: 0 18px 18px; }
 .status { min-height: 24px; display: flex; align-items: flex-start; gap: 9px; color: var(--muted); font-size: 0.84rem; line-height: 1.45; }
 .status-mark { flex: 0 0 auto; width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: #a5ada7; }
 .status.is-success { color: #365500; }
@@ -81,25 +81,43 @@ code { padding: 0.08em 0.35em; border: 1px solid #cbd1cb; border-radius: 4px; ba
 .status.is-error { color: #a52d27; }
 .status.is-error .status-mark { background: var(--red); }
 
-.download-button {
-  min-height: 52px;
-  display: flex;
+.export-panel { padding: 18px; border-top: 1px solid var(--line); background: #f8faf5; }
+.export-panel[hidden] { display: none; }
+.export-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; margin-bottom: 12px; }
+.export-heading h2 { margin: 0; font-size: 1rem; letter-spacing: -0.02em; }
+.export-heading span { color: var(--muted); font-size: 0.78rem; }
+.export-options { display: grid; gap: 8px; }
+.export-option {
+  min-height: 68px;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 21px;
+  gap: 13px;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 16px;
-  border: 1px solid var(--ink);
-  border-radius: 8px;
-  color: #fff;
-  background: var(--ink);
-  font-weight: 690;
+  padding: 10px 14px 10px 10px;
+  border: 1px solid #c8cfc8;
+  border-radius: 9px;
+  color: var(--ink);
+  background: #fff;
+  text-align: left;
   cursor: pointer;
-  transition: transform 150ms ease, background 150ms ease;
+  transition: border-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
 }
-.download-button:not(:disabled):hover { transform: translateY(-2px); background: #26392d; }
-.download-button:focus-visible { outline: 3px solid rgba(141, 202, 0, 0.5); outline-offset: 3px; }
-.download-button:disabled { border-color: #c7ccc8; background: #c7ccc8; cursor: not-allowed; }
-.download-button svg { width: 21px; height: 21px; }
-.download-button path { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+.export-option:not(:disabled):hover { border-color: #7a877d; transform: translateY(-1px); box-shadow: 0 5px 16px rgba(30, 44, 34, 0.07); }
+.export-option:focus-visible { outline: 3px solid rgba(141, 202, 0, 0.5); outline-offset: 2px; }
+.export-option:disabled { opacity: 0.5; cursor: not-allowed; }
+.export-option > svg { width: 21px; height: 21px; }
+.export-option > svg path { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+.export-copy { min-width: 0; display: grid; gap: 3px; }
+.export-copy strong { font-size: 0.9rem; }
+.export-copy > span { color: var(--muted); font-size: 0.78rem; line-height: 1.35; }
+.export-icon { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 7px; background: #eef1eb; font-size: 0.62rem; font-weight: 800; letter-spacing: 0.04em; }
+.export-icon-original { background: var(--lime); }
+.export-icon-zip { color: #fff; background: var(--ink); }
+.export-icon-layers { position: relative; display: block; }
+.export-icon-layers i { position: absolute; width: 23px; height: 14px; left: 8px; border: 1.5px solid var(--ink); border-radius: 2px; background: #fff; }
+.export-icon-layers i:nth-child(1) { top: 7px; background: #f4a261; }
+.export-icon-layers i:nth-child(2) { top: 13px; background: #62a9dd; }
+.export-icon-layers i:nth-child(3) { top: 19px; background: var(--lime); }
 
 .preview-panel { border-top: 1px solid var(--line); }
 .preview-panel[hidden] { display: none; }
@@ -127,8 +145,7 @@ code { padding: 0.08em 0.35em; border: 1px solid #cbd1cb; border-radius: 4px; ba
   .local-note { display: none; }
   main { padding-top: 46px; }
   .drop-zone { min-height: 260px; }
-  .result-row { grid-template-columns: 1fr; }
-  .download-button { width: 100%; }
+  .export-heading { align-items: flex-start; flex-direction: column; gap: 3px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

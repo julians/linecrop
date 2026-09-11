@@ -1,9 +1,16 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
+const INKSCAPE_NS = "http://www.inkscape.org/namespaces/inkscape";
+const XMLNS_NS = "http://www.w3.org/2000/xmlns/";
 const GEOMETRY_SELECTOR = "path,rect,circle,ellipse,polygon,polyline";
 
 const fileInput = document.querySelector("#file-input");
 const dropZone = document.querySelector("#drop-zone");
-const downloadButton = document.querySelector("#download-button");
+const exportPanel = document.querySelector("#export-panel");
+const exportSummary = document.querySelector("#export-summary");
+const downloadOriginal = document.querySelector("#download-original");
+const downloadMultilayer = document.querySelector("#download-multilayer");
+const downloadIndividuals = document.querySelector("#download-individuals");
+const individualExportCopy = document.querySelector("#individual-export-copy");
 const statusElement = document.querySelector("#status");
 const fileMeta = document.querySelector("#file-meta");
 const previewImage = document.querySelector("#preview-image");
@@ -13,7 +20,12 @@ const processingHost = document.querySelector("#processing-host");
 
 let outputSvg = "";
 let outputName = "clipped.svg";
+let multilayerSvg = "";
+let multilayerName = "multilayer.svg";
+let individualExports = [];
+let individualArchiveName = "layers.zip";
 let previewUrl = "";
+let vpypeOptimizerPromise = null;
 
 fileInput.addEventListener("change", () => {
   const [file] = fileInput.files;
@@ -42,14 +54,11 @@ dropZone.addEventListener("drop", (event) => {
   else setStatus("That file is not an SVG.", "error");
 });
 
-downloadButton.addEventListener("click", () => {
-  if (!outputSvg) return;
-  const url = URL.createObjectURL(new Blob([outputSvg], { type: "image/svg+xml" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = outputName;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+downloadOriginal.addEventListener("click", () => downloadBlob(outputSvg, outputName, "image/svg+xml"));
+downloadMultilayer.addEventListener("click", () => downloadBlob(multilayerSvg, multilayerName, "image/svg+xml"));
+downloadIndividuals.addEventListener("click", () => {
+  if (!individualExports.length) return;
+  downloadBlob(buildZip(individualExports), individualArchiveName, "application/zip");
 });
 
 async function processFile(file) {
@@ -60,12 +69,20 @@ async function processFile(file) {
   try {
     const source = await file.text();
     const result = await clipSvgGeometry(source);
+    const baseName = file.name.replace(/\.svg$/i, "");
     outputSvg = result.svg;
-    outputName = file.name.replace(/\.svg$/i, "") + "-clipped.svg";
+    outputName = `${baseName}-clipped.svg`;
+    multilayerSvg = result.multilayerSvg;
+    multilayerName = `${baseName}-multilayer.svg`;
+    individualExports = result.layers.map((layer, index) => ({
+      name: `${baseName}-${String(index + 1).padStart(2, "0")}-${filenamePart(layer.label)}.svg`,
+      content: layer.svg,
+    }));
+    individualArchiveName = `${baseName}-layers.zip`;
     showPreview(outputSvg);
-    downloadButton.disabled = false;
+    showExports(result.layers, result.optimization);
     setStatus(
-      `${result.groups} ${plural(result.groups, "group")} · ${result.sourceLines} source ${plural(result.sourceLines, "line")} → ${result.outputLines} clipped ${plural(result.outputLines, "segment")}. Ready for the plotter.`,
+      successMessage(result),
       "success",
     );
   } catch (error) {
@@ -144,7 +161,182 @@ async function clipSvgGeometry(source) {
 
   svg.setAttribute("xmlns", SVG_NS);
   const serialized = new XMLSerializer().serializeToString(svg);
-  return { svg: `<?xml version="1.0" encoding="UTF-8"?>\n${serialized}\n`, sourceLines: sourceLineCount, outputLines, groups: pairs.length };
+  const registered = buildRegisteredExports(svg, pairs);
+  const optimized = await optimizeRegisteredExports(registered);
+  return {
+    svg: xmlDocument(serialized),
+    multilayerSvg: optimized.svg,
+    layers: optimized.layers,
+    registration: registered.registration,
+    optimization: optimized.stats,
+    sourceLines: sourceLineCount,
+    outputLines,
+    groups: pairs.length,
+  };
+}
+
+async function optimizeRegisteredExports(registered) {
+  setStatus("Loading the plotter optimizer…", "working");
+  const vpype = await loadVpypeOptimizer();
+  const quantization = vpype.convertLength("0.05mm");
+  const mergeTolerance = vpype.convertLength("0.1mm");
+  const simplifyTolerance = vpype.convertLength("0.05mm");
+  const document = new vpype.Document();
+  const optimizedLayers = [];
+  let pageSize = null;
+  let pathsBefore = 0;
+  let pathsAfter = 0;
+  let segmentsBefore = 0;
+  let segmentsAfter = 0;
+  let penUpBefore = 0;
+  let penUpAfter = 0;
+
+  for (let index = 0; index < registered.layers.length; index += 1) {
+    const layer = registered.layers[index];
+    setStatus(`Optimizing color layer ${index + 1} of ${registered.layers.length}…`, "working");
+    await nextFrame();
+
+    const parsed = vpype.readSvg(layer.svg, quantization);
+    if (!pageSize) pageSize = [parsed.width, parsed.height];
+    pathsBefore += parsed.lines.count;
+    segmentsBefore += parsed.lines.segmentCount();
+    penUpBefore += parsed.lines.penUpLength()[0];
+
+    let lines = vpype.linemerge(parsed.lines, { tolerance: mergeTolerance });
+    lines = vpype.linesort(lines, { twoOpt: true });
+    lines = vpype.linesimplify(lines, { tolerance: simplifyTolerance });
+    lines.setProperty(vpype.METADATA_FIELD_NAME, layer.label);
+
+    pathsAfter += lines.count;
+    segmentsAfter += lines.segmentCount();
+    penUpAfter += lines.penUpLength()[0];
+    document.add(lines, index + 1, true);
+
+    const individual = new vpype.Document({ pageSize });
+    individual.add(lines, 1, true);
+    optimizedLayers.push({
+      label: layer.label,
+      svg: vpype.writeSvg(individual, { colorMode: "default" }),
+    });
+  }
+
+  if (!pageSize) throw new Error("The color layers contain no plottable geometry.");
+  document.pageSize = pageSize;
+  const reduction = penUpBefore > 0
+    ? Math.max(0, Math.min(100, Math.round((1 - penUpAfter / penUpBefore) * 100)))
+    : 0;
+
+  return {
+    svg: vpype.writeSvg(document, { colorMode: "default" }),
+    layers: optimizedLayers,
+    stats: {
+      pathsBefore,
+      pathsAfter,
+      segmentsBefore,
+      segmentsAfter,
+      penUpBefore,
+      penUpAfter,
+      reduction,
+    },
+  };
+}
+
+function loadVpypeOptimizer() {
+  if (!vpypeOptimizerPromise) vpypeOptimizerPromise = import("./vpype-optimizer.js");
+  return vpypeOptimizerPromise;
+}
+
+function buildRegisteredExports(sourceSvg, pairs) {
+  const registeredSvg = sourceSvg.cloneNode(false);
+  registeredSvg.replaceChildren();
+  registeredSvg.setAttribute("xmlns", SVG_NS);
+  registeredSvg.setAttributeNS(XMLNS_NS, "xmlns:inkscape", INKSCAPE_NS);
+
+  const rootMatrix = sourceSvg.getCTM();
+  let rootInverse;
+  try {
+    rootInverse = rootMatrix ? rootMatrix.inverse() : new DOMMatrix();
+  } catch {
+    rootInverse = new DOMMatrix();
+  }
+
+  const layers = pairs.map(({ linesGroup }, index) => {
+    const label = layerLabel(linesGroup, index);
+    const layer = document.createElementNS(SVG_NS, "g");
+    layer.id = `layer-${index + 1}-${filenamePart(label)}`;
+    layer.setAttributeNS(INKSCAPE_NS, "inkscape:groupmode", "layer");
+    layer.setAttributeNS(INKSCAPE_NS, "inkscape:label", label);
+    layer.setAttribute("data-plotter-layer", String(index + 1));
+
+    for (const sourceLine of linesGroup.querySelectorAll("line")) {
+      const matrix = sourceLine.getCTM();
+      if (!matrix) continue;
+      const start = new DOMPoint(numberAttr(sourceLine, "x1"), numberAttr(sourceLine, "y1"))
+        .matrixTransform(matrix)
+        .matrixTransform(rootInverse);
+      const end = new DOMPoint(numberAttr(sourceLine, "x2"), numberAttr(sourceLine, "y2"))
+        .matrixTransform(matrix)
+        .matrixTransform(rootInverse);
+      const line = document.createElementNS(SVG_NS, "line");
+      line.setAttribute("x1", tidy(start.x));
+      line.setAttribute("y1", tidy(start.y));
+      line.setAttribute("x2", tidy(end.x));
+      line.setAttribute("y2", tidy(end.y));
+      if (sourceLine.id) line.id = sourceLine.id;
+      copyResolvedLineStyle(sourceLine, line);
+      layer.append(line);
+    }
+
+    registeredSvg.append(layer);
+    return { label, node: layer };
+  });
+
+  const svg = xmlDocument(new XMLSerializer().serializeToString(registeredSvg));
+  const individualLayers = layers.map(({ label, node }) => {
+    const individualSvg = registeredSvg.cloneNode(false);
+    individualSvg.append(node.cloneNode(true));
+    return { label, svg: xmlDocument(new XMLSerializer().serializeToString(individualSvg)) };
+  });
+
+  return {
+    svg,
+    layers: individualLayers,
+    registration: {
+      width: registeredSvg.getAttribute("width") || "",
+      height: registeredSvg.getAttribute("height") || "",
+      viewBox: registeredSvg.getAttribute("viewBox") || "",
+    },
+  };
+}
+
+function copyResolvedLineStyle(source, target) {
+  const style = getComputedStyle(source);
+  const properties = [
+    "stroke",
+    "stroke-width",
+    "stroke-linecap",
+    "stroke-linejoin",
+    "stroke-miterlimit",
+    "stroke-dasharray",
+    "stroke-dashoffset",
+    "stroke-opacity",
+    "opacity",
+    "vector-effect",
+  ];
+  target.setAttribute("fill", "none");
+  for (const property of properties) {
+    const value = style.getPropertyValue(property);
+    if (value) target.setAttribute(property, value);
+  }
+}
+
+function layerLabel(group, index) {
+  const suffix = group.id.replace(/^lines(?:[ _-])?/i, "").trim();
+  return suffix || `Layer ${index + 1}`;
+}
+
+function xmlDocument(serialized) {
+  return `<?xml version="1.0" encoding="UTF-8"?>\n${serialized}\n`;
 }
 
 function clipLine(line, maskShapes, boundaries) {
@@ -344,13 +536,126 @@ function setStatus(message, type) {
 
 function resetOutput() {
   outputSvg = "";
-  downloadButton.disabled = true;
+  multilayerSvg = "";
+  individualExports = [];
+  downloadOriginal.disabled = true;
+  downloadMultilayer.disabled = true;
+  downloadIndividuals.disabled = true;
+  exportPanel.hidden = true;
   if (previewUrl) URL.revokeObjectURL(previewUrl);
   previewUrl = "";
   previewImage.hidden = true;
   previewImage.removeAttribute("src");
   emptyPreview.hidden = false;
   previewPanel.hidden = true;
+}
+
+function showExports(layers, optimization) {
+  const count = layers.length;
+  exportSummary.textContent = optimization.penUpBefore > 0
+    ? `${count} ${plural(count, "layer")} · ${optimization.reduction}% less pen travel`
+    : `${count} optimized color ${plural(count, "layer")}`;
+  individualExportCopy.textContent = `${count} optimized, registered ${plural(count, "SVG")} in one ZIP`;
+  downloadOriginal.disabled = false;
+  downloadMultilayer.disabled = false;
+  downloadIndividuals.disabled = false;
+  exportPanel.hidden = false;
+}
+
+function successMessage(result) {
+  const clipped = `${result.groups} ${plural(result.groups, "group")} · ${result.sourceLines} source ${plural(result.sourceLines, "line")} → ${result.outputLines} clipped ${plural(result.outputLines, "segment")}`;
+  const optimized = result.optimization.penUpBefore > 0
+    ? `${result.optimization.reduction}% less pen-up travel`
+    : "plot paths optimized";
+  return `${clipped} · ${optimized}. Ready for the plotter.`;
+}
+
+function downloadBlob(content, filename, type) {
+  if (!content) return;
+  const blob = content instanceof Blob ? content : new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function filenamePart(value) {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/gi, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase() || "layer";
+}
+
+function buildZip(files) {
+  const encoder = new TextEncoder();
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+  const { time, date } = zipTimestamp(new Date());
+
+  for (const file of files) {
+    const name = encoder.encode(file.name);
+    const data = encoder.encode(file.content);
+    const checksum = crc32(data);
+    const localHeader = concatBytes(
+      u32(0x04034b50), u16(20), u16(0x0800), u16(0), u16(time), u16(date),
+      u32(checksum), u32(data.length), u32(data.length), u16(name.length), u16(0), name,
+    );
+    localParts.push(localHeader, data);
+
+    centralParts.push(concatBytes(
+      u32(0x02014b50), u16(20), u16(20), u16(0x0800), u16(0), u16(time), u16(date),
+      u32(checksum), u32(data.length), u32(data.length), u16(name.length), u16(0), u16(0),
+      u16(0), u16(0), u32(0), u32(offset), name,
+    ));
+    offset += localHeader.length + data.length;
+  }
+
+  const centralSize = centralParts.reduce((total, part) => total + part.length, 0);
+  const end = concatBytes(
+    u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length),
+    u32(centralSize), u32(offset), u16(0),
+  );
+  return new Blob([...localParts, ...centralParts, end], { type: "application/zip" });
+}
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function zipTimestamp(value) {
+  const year = Math.max(1980, value.getFullYear());
+  return {
+    time: (value.getHours() << 11) | (value.getMinutes() << 5) | Math.floor(value.getSeconds() / 2),
+    date: ((year - 1980) << 9) | ((value.getMonth() + 1) << 5) | value.getDate(),
+  };
+}
+
+function u16(value) {
+  return new Uint8Array([value & 255, (value >>> 8) & 255]);
+}
+
+function u32(value) {
+  return new Uint8Array([value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255]);
+}
+
+function concatBytes(...parts) {
+  const output = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
+  let offset = 0;
+  for (const part of parts) {
+    output.set(part, offset);
+    offset += part.length;
+  }
+  return output;
 }
 
 function showPreview(svgText) {
@@ -390,16 +695,33 @@ function registerWebMcpTool() {
           setStatus("Reading and tracing mask boundaries…", "working");
           const result = await clipSvgGeometry(input.svg);
           const filename = typeof input.filename === "string" && input.filename.trim() ? input.filename.trim() : "drawing.svg";
+          const baseName = filename.replace(/\.svg$/i, "");
           outputSvg = result.svg;
-          outputName = filename.replace(/\.svg$/i, "") + "-clipped.svg";
+          outputName = `${baseName}-clipped.svg`;
+          multilayerSvg = result.multilayerSvg;
+          multilayerName = `${baseName}-multilayer.svg`;
+          individualExports = result.layers.map((layer, index) => ({
+            name: `${baseName}-${String(index + 1).padStart(2, "0")}-${filenamePart(layer.label)}.svg`,
+            content: layer.svg,
+          }));
+          individualArchiveName = `${baseName}-layers.zip`;
           fileMeta.textContent = filename;
           showPreview(outputSvg);
-          downloadButton.disabled = false;
+          showExports(result.layers, result.optimization);
           setStatus(
-            `${result.groups} ${plural(result.groups, "group")} · ${result.sourceLines} source ${plural(result.sourceLines, "line")} → ${result.outputLines} clipped ${plural(result.outputLines, "segment")}. Ready for the plotter.`,
+            successMessage(result),
             "success",
           );
-          return { groups: result.groups, sourceLines: result.sourceLines, clippedSegments: result.outputLines, filename: outputName };
+          return {
+            groups: result.groups,
+            sourceLines: result.sourceLines,
+            clippedSegments: result.outputLines,
+            filename: outputName,
+            multilayerFilename: multilayerName,
+            layerFilenames: individualExports.map((entry) => entry.name),
+            registration: result.registration,
+            optimization: result.optimization,
+          };
         },
       }),
     ).catch(() => {});

@@ -41,11 +41,45 @@
             <span class="status-mark" aria-hidden="true"></span>
             <span>Waiting for an SVG</span>
           </div>
-          <button id="download-button" class="download-button" type="button" disabled>
-            <span>Download clipped SVG</span>
-            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10m0 0 4-4m-4 4L6 9M3 16h14" /></svg>
-          </button>
         </div>
+
+        <section class="export-panel" id="export-panel" aria-labelledby="export-title" hidden>
+          <div class="export-heading">
+            <h2 id="export-title">Choose a download</h2>
+            <span id="export-summary">Plotter files are ready</span>
+          </div>
+
+          <div class="export-options">
+            <button id="download-original" class="export-option" type="button" disabled>
+              <span class="export-icon export-icon-original" aria-hidden="true">SVG</span>
+              <span class="export-copy">
+                <strong>Clipped SVG</strong>
+                <span>Same download as before</span>
+              </span>
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10m0 0 4-4m-4 4L6 9M3 16h14" /></svg>
+            </button>
+
+            <button id="download-multilayer" class="export-option" type="button" disabled>
+              <span class="export-icon export-icon-layers" aria-hidden="true">
+                <i></i><i></i><i></i>
+              </span>
+              <span class="export-copy">
+                <strong>Multilayer SVG</strong>
+                <span>Merged, sorted and simplified for plotting</span>
+              </span>
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10m0 0 4-4m-4 4L6 9M3 16h14" /></svg>
+            </button>
+
+            <button id="download-individuals" class="export-option" type="button" disabled>
+              <span class="export-icon export-icon-zip" aria-hidden="true">ZIP</span>
+              <span class="export-copy">
+                <strong>Individual SVGs</strong>
+                <span id="individual-export-copy">One registered file per color</span>
+              </span>
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10m0 0 4-4m-4 4L6 9M3 16h14" /></svg>
+            </button>
+          </div>
+        </section>
 
         <div class="preview-panel" id="preview-panel" hidden>
           <div class="preview-header">
@@ -59,7 +93,7 @@
         </div>
       </section>
 
-      <p class="footnote">The download contains actual shortened <code>&lt;line&gt;</code> geometry, not a visual clip path.</p>
+      <p class="footnote">Multilayer and individual exports are merged, sorted and simplified with vpype. The original clipped SVG stays unchanged.</p>
     </main>
 
     <div id="processing-host" aria-hidden="true"></div>
