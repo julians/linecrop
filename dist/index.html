@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Clip SVG line geometry to a mask group, ready for plotting." />
+    <title>Linecrop — SVG line clipper</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="./" aria-label="Linecrop home">
+        <svg viewBox="0 0 28 28" aria-hidden="true">
+          <path d="M4 22 22 4M9 26 26 9M2 17 17 2" />
+          <path class="brand-mask" d="M7 7h14v14H7z" />
+        </svg>
+        <span>Linecrop</span>
+      </a>
+      <span class="local-note">Runs locally in your browser</span>
+    </header>
+
+    <main>
+      <div class="heading">
+        <h1>Clip SVG lines to a mask.</h1>
+        <p>Drop in an SVG with groups named <code>mask</code> and <code>lines</code>.</p>
+      </div>
+
+      <section class="tool" aria-label="SVG clipping tool">
+        <label class="drop-zone" id="drop-zone" for="file-input">
+          <input id="file-input" type="file" accept="image/svg+xml,.svg" />
+          <span class="drop-icon" aria-hidden="true">
+            <svg viewBox="0 0 40 40"><path d="M20 27V9m0 0-7 7m7-7 7 7M8 29v3h24v-3" /></svg>
+          </span>
+          <span class="drop-title">Drop SVG here</span>
+          <span class="drop-help">or click to choose</span>
+        </label>
+
+        <div class="result-row">
+          <div id="status" class="status" role="status" aria-live="polite">
+            <span class="status-mark" aria-hidden="true"></span>
+            <span>Waiting for an SVG</span>
+          </div>
+          <button id="download-button" class="download-button" type="button" disabled>
+            <span>Download clipped SVG</span>
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10m0 0 4-4m-4 4L6 9M3 16h14" /></svg>
+          </button>
+        </div>
+
+        <div class="preview-panel" id="preview-panel" hidden>
+          <div class="preview-header">
+            <span>Preview</span>
+            <span id="file-meta" class="file-meta">No file loaded</span>
+          </div>
+          <div class="preview-stage" id="preview-stage">
+            <div id="empty-preview" hidden></div>
+            <img id="preview-image" alt="Clipped SVG preview" hidden />
+          </div>
+        </div>
+      </section>
+
+      <p class="footnote">The download contains actual shortened <code>&lt;line&gt;</code> geometry, not a visual clip path.</p>
+    </main>
+
+    <div id="processing-host" aria-hidden="true"></div>
+    <script src="app.js"></script>
+  </body>
+</html>
